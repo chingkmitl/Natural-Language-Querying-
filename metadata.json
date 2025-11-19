@@ -1,0 +1,5 @@
+{
+  "name": "Gemini CSV Financial Analyst",
+  "description": "AI-powered financial data analysis tool using Gemini API to parse CSVs and generate natural language insights.",
+  "requestFramePermissions": []
+}
