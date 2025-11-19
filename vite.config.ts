@@ -13,8 +13,9 @@ export default defineConfig(({ mode }) => {
     define: {
       // Expose API_KEY to the client-side code
       // WARNING: Be careful with exposing sensitive keys in client-side code.
-      // For this serverless/static demo, it's necessary, but restrict usage in Google Cloud Console.
       'process.env.API_KEY': JSON.stringify(env.API_KEY),
+      'process.env.SUPABASE_URL': JSON.stringify(env.SUPABASE_URL),
+      'process.env.SUPABASE_KEY': JSON.stringify(env.SUPABASE_KEY),
     },
   };
 });

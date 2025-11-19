@@ -11,10 +11,13 @@ import {
   BarChart3, 
   RefreshCcw, 
   Send,
-  Database
+  Database,
+  CloudUpload,
+  CloudDownload
 } from 'lucide-react';
 import { FinancialRecord, RawCsvRow, AppStatus, AnalysisResult } from './types';
 import { analyzeData } from './services/geminiService';
+import { saveRecordsToDb, getRecordsFromDb } from './services/supabaseClient';
 
 const App: React.FC = () => {
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
@@ -23,6 +26,8 @@ const App: React.FC = () => {
   const [query, setQuery] = useState<string>('');
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // -- Handlers --
@@ -111,44 +116,93 @@ const App: React.FC = () => {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  const handleSaveToDb = async () => {
+    if (data.length === 0) return;
+    setIsSyncing(true);
+    try {
+      await saveRecordsToDb(data);
+      alert(`บันทึกข้อมูล ${data.length} รายการลงฐานข้อมูลเรียบร้อยแล้ว`);
+    } catch (err) {
+      console.error(err);
+      alert('เกิดข้อผิดพลาดในการบันทึกข้อมูล: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleLoadFromDb = async () => {
+    setIsSyncing(true);
+    setStatus(AppStatus.PARSING);
+    setError(null);
+    try {
+      const dbData = await getRecordsFromDb();
+      if (dbData.length === 0) {
+        throw new Error("ไม่พบข้อมูลในฐานข้อมูล");
+      }
+      setData(dbData);
+      setFileName('Supabase Database');
+      setStatus(AppStatus.READY);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Database Load Error");
+      setStatus(AppStatus.IDLE);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   // -- Render Helpers --
 
   const renderIdle = () => (
     <div className="flex flex-col items-center justify-center py-16 animate-in zoom-in-95 duration-500">
-      <div className="bg-white p-12 rounded-3xl shadow-xl border border-slate-100 text-center max-w-xl w-full hover:shadow-2xl transition-all duration-300">
+      <div className="bg-white p-12 rounded-3xl shadow-xl border border-slate-100 text-center max-w-xl w-full hover:shadow-2xl transition-all duration-300 relative overflow-hidden">
         <div className="w-24 h-24 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-8 ring-8 ring-blue-50/50">
           <Upload className="w-10 h-10 text-blue-600" />
         </div>
         <h2 className="text-3xl font-bold text-slate-800 mb-4">อัปโหลดข้อมูลการเงิน</h2>
         <p className="text-slate-500 mb-10 leading-relaxed">
-          รองรับไฟล์ CSV (เช่น <code>H_ZCSR181H_Cleaned...csv</code>) 
-          <br/>ที่มีคอลัมน์ <span className="font-mono text-blue-600 bg-blue-50 px-1 rounded">BA, monthly, actCode, amount</span>
+          รองรับไฟล์ CSV หรือโหลดข้อมูลเดิมจาก Database
+          <br/>คอลัมน์ที่รองรับ: <span className="font-mono text-blue-600 bg-blue-50 px-1 rounded">BA, monthly, actCode, amount</span>
         </p>
         
-        <label className="relative group cursor-pointer inline-block w-full sm:w-auto">
-          <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl blur opacity-20 group-hover:opacity-40 transition duration-200"></div>
-          <div className="relative flex items-center justify-center gap-3 bg-white border border-slate-200 text-blue-700 font-bold py-4 px-10 rounded-xl group-hover:bg-slate-50 transition-all">
-            {status === AppStatus.PARSING ? (
-              <>
-                <Loader2 className="w-5 h-5 animate-spin" />
-                <span>กำลังอ่านไฟล์...</span>
-              </>
+        <div className="flex flex-col sm:flex-row gap-4 justify-center">
+          <label className="relative group cursor-pointer w-full sm:w-auto">
+            <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl blur opacity-20 group-hover:opacity-40 transition duration-200"></div>
+            <div className="relative flex items-center justify-center gap-3 bg-white border border-slate-200 text-blue-700 font-bold py-4 px-8 rounded-xl group-hover:bg-slate-50 transition-all">
+              {status === AppStatus.PARSING ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>กำลังอ่านไฟล์...</span>
+                </>
+              ) : (
+                <>
+                  <FileSpreadsheet className="w-5 h-5" />
+                  <span>เลือก CSV</span>
+                </>
+              )}
+            </div>
+            <input 
+              type="file" 
+              ref={fileInputRef}
+              accept=".csv" 
+              className="hidden" 
+              onChange={handleFileUpload} 
+              disabled={status === AppStatus.PARSING || isSyncing}
+            />
+          </label>
+
+          <button 
+            onClick={handleLoadFromDb}
+            disabled={isSyncing || status === AppStatus.PARSING}
+            className="flex items-center justify-center gap-3 bg-slate-100 border border-slate-200 text-slate-700 font-bold py-4 px-8 rounded-xl hover:bg-slate-200 transition-all disabled:opacity-50"
+          >
+            {isSyncing ? (
+               <Loader2 className="w-5 h-5 animate-spin" />
             ) : (
-              <>
-                <FileSpreadsheet className="w-5 h-5" />
-                <span>เลือกไฟล์ CSV จากเครื่อง</span>
-              </>
+               <Database className="w-5 h-5" />
             )}
-          </div>
-          <input 
-            type="file" 
-            ref={fileInputRef}
-            accept=".csv" 
-            className="hidden" 
-            onChange={handleFileUpload} 
-            disabled={status === AppStatus.PARSING}
-          />
-        </label>
+            <span>โหลดจาก DB</span>
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -170,13 +224,26 @@ const App: React.FC = () => {
             </p>
           </div>
         </div>
-        <button 
-          onClick={handleReset}
-          className="text-slate-500 hover:text-red-600 hover:bg-red-50 px-4 py-2 rounded-xl transition-colors flex items-center gap-2 text-sm font-medium shrink-0"
-        >
-          <RefreshCcw className="w-4 h-4" />
-          เปลี่ยนไฟล์
-        </button>
+        <div className="flex gap-2 shrink-0">
+          {/* Save to DB Button */}
+          <button
+            onClick={handleSaveToDb}
+            disabled={isSyncing}
+            className="text-emerald-600 hover:bg-emerald-50 bg-white border border-slate-200 px-4 py-2 rounded-xl transition-colors flex items-center gap-2 text-sm font-medium"
+            title="บันทึกข้อมูลชุดนี้ลง Supabase"
+          >
+             {isSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <CloudUpload className="w-4 h-4" />}
+             บันทึกลง DB
+          </button>
+
+          <button 
+            onClick={handleReset}
+            className="text-slate-500 hover:text-red-600 hover:bg-red-50 px-4 py-2 rounded-xl transition-colors flex items-center gap-2 text-sm font-medium"
+          >
+            <RefreshCcw className="w-4 h-4" />
+            เปลี่ยนไฟล์
+          </button>
+        </div>
       </div>
 
       {/* Query Input */}
